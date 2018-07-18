@@ -1,0 +1,86 @@
+import torch
+import torch.nn as nn
+import torch.utils.data as Data
+import torchvision
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib import cm
+import numpy as np
+from torch.autograd import Variable
+
+# Hyper Parameters
+EPOCH = 10
+BATCH_SIZE = 64
+DOWNLOAD_MNIST = False
+N_TEST_IMG = 5
+ALFA = 0.005
+DECAYRATE = 0.3
+ROOT = 'G:\学习\pytorch神经网络\Mnis'
+
+train_data = torchvision.datasets.MNIST(root=ROOT,
+                                        train=True,
+                                        transform=torchvision.transforms.ToTensor(),
+                                        download = False)
+train_loader = Data.DataLoader(dataset=train_data, batch_size=BATCH_SIZE, shuffle=True) # 50张1*28*28
+
+class AutoEncoder(nn.Module):
+    def __init__(self):
+        super(AutoEncoder, self).__init__()
+
+        self.encoder = nn.Sequential(
+            nn.Linear(28*28, 128),
+            nn.Tanh(),
+            nn.Linear(128, 64),
+            nn.Tanh(),
+            nn.Linear(64, 12),
+            nn.Tanh(),
+            nn.Linear(12, 3),   # compress to 3 features which can be visualized in plt
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(3, 12),
+            nn.Tanh(),
+            nn.Linear(12, 64),
+            nn.Tanh(),
+            nn.Linear(64, 128),
+            nn.Tanh(),
+            nn.Linear(128, 28*28),
+            nn.Sigmoid(),       # compress to a range (0, 1)
+        )
+
+    def forward(self, x):
+        encoded = self.encoder(x)
+        decoded = self.decoder(encoded)
+        return encoded, decoded
+
+autoencoder = AutoEncoder()
+
+optimizer = torch.optim.Adam(autoencoder.parameters(), lr=ALFA, weight_decay=0.3)
+loss_func = nn.MSELoss()
+
+if __name__ == '__main__':
+    for epoch in range(EPOCH):
+        for step, (x, b_label) in enumerate(train_loader):
+            ALFA = ALFA/(1+DECAYRATE*epoch)
+            b_x = x.view(-1, 28 * 28)  # batch x, shape (batch, 28*28)
+            b_y = x.view(-1, 28 * 28)  # batch y, shape (batch, 28*28)
+
+            encoded, decoded = autoencoder(b_x)
+
+            loss = loss_func(decoded, b_y)  # mean square error
+            optimizer.zero_grad()  # clear gradients for this training step
+            loss.backward()  # backpropagation, compute gradients
+            optimizer.step()  # apply gradients
+
+            if step % 100 == 0:
+                print('Epoch: ', epoch, '| train loss: %.4f' % loss.data.numpy())
+
+    view_data = train_data.train_data[:200].view(-1, 28*28).type(torch.FloatTensor)/255.
+    encoded_data, _ = autoencoder(view_data)
+    fig = plt.figure(2); ax = Axes3D(fig)
+    X, Y, Z = encoded_data.data[:, 0].numpy(), encoded_data.data[:, 1].numpy(), encoded_data.data[:, 2].numpy()
+    values = train_data.train_labels[:200].numpy()
+    for x, y, z, s in zip(X, Y, Z, values):
+        c = cm.rainbow(int(255*s/9)); ax.text(x, y, z, s, backgroundcolor=c)
+    ax.set_xlim(X.min(), X.max()); ax.set_ylim(Y.min(), Y.max()); ax.set_zlim(Z.min(), Z.max())
+    plt.show()
+    torch.save(autoencoder,'autoencoder.plk')
